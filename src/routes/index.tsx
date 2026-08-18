@@ -406,27 +406,64 @@ function CommandCenter() {
                     {inventory
                       .filter((s) => s.zone === z.id)
                       .map((s) => (
-                        <button
-                          key={s.sku}
-                          onClick={() => setSelectedSku(s.sku)}
-                          className={`rounded border p-2 text-left transition-transform hover:scale-[1.03] ${healthTone[s.health]} ${
-                            selectedSku === s.sku ? "ring-2 ring-primary" : ""
-                          }`}
-                        >
-                          <span className="block font-mono text-[10px] opacity-80">
-                            {s.bin} · {s.sku}
-                          </span>
-                          <span className="block font-display text-lg font-bold leading-tight">{s.qty}</span>
-                          <span className="block truncate text-[10px] opacity-80">{s.health}</span>
-                          <span className="mt-1 block h-1 overflow-hidden rounded-full bg-background/40">
-                            <span
-                              className="block h-full rounded-full bg-current"
-                              style={{ width: `${Math.min(100, (s.qty / s.capacity) * 100)}%` }}
-                            />
-                          </span>
-                        </button>
+                        <Popover key={s.sku}>
+                          <PopoverTrigger asChild>
+                            <button
+                              onClick={() => setSelectedSku(s.sku)}
+                              className={`rounded border p-2 text-left transition-transform hover:scale-[1.03] ${healthTone[s.health]} ${
+                                selectedSku === s.sku ? "ring-2 ring-primary" : ""
+                              } ${pulsed.includes(s.sku) ? "animate-[pulse_1.4s_ease-in-out_infinite] ring-2 ring-current" : ""}`}
+                            >
+                              <span className="block font-mono text-[10px] opacity-80">
+                                {s.bin} · {s.sku}
+                              </span>
+                              <span className="block font-display text-lg font-bold leading-tight">{s.qty}</span>
+                              <span className="block truncate text-[10px] opacity-80">{s.health}</span>
+                              <span className="mt-1 block h-1 overflow-hidden rounded-full bg-background/40">
+                                <span
+                                  className="block h-full rounded-full bg-current"
+                                  style={{ width: `${Math.min(100, (s.qty / s.capacity) * 100)}%` }}
+                                />
+                              </span>
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent align="center" className="w-64 border-border bg-popover p-3">
+                            <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+                              Bin {s.bin} · {s.sku}
+                            </p>
+                            <p className="mt-1 font-display text-base font-semibold">{s.name}</p>
+                            <dl className="mt-2 space-y-1 text-xs">
+                              <div className="flex justify-between">
+                                <dt className="text-muted-foreground">Stock level</dt>
+                                <dd className="font-mono">
+                                  {s.qty} / {s.capacity} units
+                                </dd>
+                              </div>
+                              <div className="flex justify-between">
+                                <dt className="text-muted-foreground">Item status</dt>
+                                <dd>
+                                  <span className={`rounded border px-1.5 py-0.5 text-[11px] ${healthTone[s.health]}`}>
+                                    {s.health}
+                                  </span>
+                                </dd>
+                              </div>
+                              <div className="flex justify-between">
+                                <dt className="text-muted-foreground">Zone</dt>
+                                <dd className="font-mono">{z.label}</dd>
+                              </div>
+                            </dl>
+                            <button
+                              onClick={() => markDamaged(s.sku)}
+                              disabled={s.qty === 0}
+                              className="mt-3 flex w-full items-center justify-center gap-1.5 rounded border border-info/50 bg-info/15 px-2 py-1.5 text-xs font-semibold text-info transition-colors hover:bg-info/25 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <Wrench size={13} /> Mark 1 Item Damaged
+                            </button>
+                          </PopoverContent>
+                        </Popover>
                       ))}
                   </div>
+
                 </div>
               ))}
             </div>
