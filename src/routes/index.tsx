@@ -50,7 +50,7 @@ export const Route = createFileRoute("/")({
       {
         property: "og:description",
         content:
-          "Monitor orders, bin stock levels, SLA breaches and dispatch exceptions from a single real-time dashboard.",
+          "Live warehouse command center: order queue priority, bin-level stock map, SLA countdowns and exception resolution in one screen.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

@@ -77,14 +77,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "OmniWarehouse OS" },
-      { name: "description", content: "Warehouse operations command center" },
+      { title: "OmniWarehouse OS — Operations Command Center" },
+      { name: "description", content: "Live warehouse command center: order queue priority, bin-level stock map, SLA countdowns and exception resolution in one screen." },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "OmniWarehouse OS" },
-      { property: "og:description", content: "Warehouse operations command center" },
+      { property: "og:title", content: "OmniWarehouse OS — Operations Command Center" },
+      { property: "og:description", content: "Live warehouse command center: order queue priority, bin-level stock map, SLA countdowns and exception resolution in one screen." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "OmniWarehouse OS — Operations Command Center" },
+      { name: "twitter:description", content: "Live warehouse command center: order queue priority, bin-level stock map, SLA countdowns and exception resolution in one screen." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/90cac6e85d725638442577c7ede09f10/id-preview-43afa6ba--a8fb7fd6-a669-4f06-968d-7759c81f5ef2.lovable.app-1787035431517.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/90cac6e85d725638442577c7ede09f10/id-preview-43afa6ba--a8fb7fd6-a669-4f06-968d-7759c81f5ef2.lovable.app-1787035431517.png" },
     ],
     links: [
       {
