@@ -99,17 +99,22 @@ const healthTone: Record<StockHealth, string> = {
 
 const STEPS = ["Inbound", "Putaway", "Pick", "Pack", "Stage", "Dispatch"] as const;
 
+type LogEntry = { id: number; t: string; msg: string; tone: string };
+
+let logSeq = 1;
+
 function CommandCenter() {
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
   const [inventory, setInventory] = useState<Sku[]>(INITIAL_INVENTORY);
   const [exceptions, setExceptions] = useState<Exception[]>(INITIAL_EXCEPTIONS);
-  const [activity, setActivity] = useState<Array<{ t: string; msg: string; tone: string }>>([
-    { t: "06:29:00", msg: "Shift started · 10 orders loaded, 15 SKUs synced", tone: "text-muted-foreground" },
+  const [activity, setActivity] = useState<LogEntry[]>([
+    { id: 0, t: "06:29:00", msg: "Shift started · 10 orders loaded, 15 SKUs synced", tone: "text-muted-foreground" },
   ]);
   const [activeStep, setActiveStep] = useState(2);
   const [selectedSku, setSelectedSku] = useState<string>("SKU-101");
   const [selectedOrder, setSelectedOrder] = useState<string>("88");
   const [dispatchRate, setDispatchRate] = useState(94);
+  const [pulsed, setPulsed] = useState<string[]>([]);
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -120,17 +125,57 @@ function CommandCenter() {
     return () => clearInterval(t);
   }, []);
 
+  useEffect(() => {
+    if (pulsed.length === 0) return;
+    const t = setTimeout(() => setPulsed([]), 6000);
+    return () => clearTimeout(t);
+  }, [pulsed]);
+
+  // Log entries are pinned: they accumulate and are only removed by an explicit reset.
   const log = (msg: string, tone = "text-muted-foreground") =>
-    setActivity((prev) =>
-      [
-        {
-          t: new Date().toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" }),
-          msg,
-          tone,
-        },
-        ...prev,
-      ].slice(0, 12),
+    setActivity((prev) => [
+      {
+        id: logSeq++,
+        t: new Date().toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" }),
+        msg,
+        tone,
+      },
+      ...prev,
+    ]);
+
+  function markDamaged(skuId: string) {
+    let label = "";
+    setInventory((prev) =>
+      prev.map((s) => {
+        if (s.sku !== skuId || s.qty === 0) return s;
+        const qty = s.qty - 1;
+        label = `${s.bin} · ${s.name}`;
+        return { ...s, qty, health: qty === 0 ? "Out of Stock" : "Damaged" };
+      }),
     );
+    setPulsed([skuId]);
+    log(`⚙ 1 unit of ${skuId} marked damaged · ${label} quarantined`, "text-info");
+  }
+
+  function dismiss(ex: Exception) {
+    setExceptions((prev) => prev.filter((e) => e.id !== ex.id));
+    log(`✕ ${ex.id} dismissed without action`, "text-muted-foreground");
+  }
+
+  function resetAll() {
+    setOrders(INITIAL_ORDERS);
+    setInventory(INITIAL_INVENTORY);
+    setExceptions(INITIAL_EXCEPTIONS);
+    setActiveStep(2);
+    setDispatchRate(94);
+    setPulsed([]);
+    setSelectedOrder("88");
+    setSelectedSku("SKU-101");
+    setActivity([
+      { id: logSeq++, t: new Date().toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" }), msg: "↺ Simulation state reset · baseline restored", tone: "text-primary" },
+    ]);
+  }
+
 
   const sorted = useMemo(() => [...orders].sort((a, b) => b.priority - a.priority), [orders]);
   const activeOrders = orders.filter((o) => o.status !== "Dispatched").length;
