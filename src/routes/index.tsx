@@ -214,6 +214,7 @@ function CommandCenter() {
       },
       ...prev.filter((e) => e.id !== "EX-1101"),
     ]);
+    setPulsed(["SKU-101"]);
     log("⚡ High-priority Order #104 injected · 10 × SKU-101 requested", "text-danger");
     log("Exception EX-1101 raised · stock shortage on SKU-101", "text-danger");
   }
@@ -237,6 +238,7 @@ function CommandCenter() {
       },
       ...prev,
     ]);
+    setPulsed(["SKU-105", "SKU-203"]);
     log("Stockout cascade simulated · 2 bins at zero", "text-danger");
   }
 
@@ -254,6 +256,7 @@ function CommandCenter() {
       },
       ...prev,
     ]);
+    setPulsed(["SKU-204", "SKU-202"]);
     log("Dock delay simulated · dispatch rate degraded", "text-warn");
   }
 
@@ -294,6 +297,7 @@ function CommandCenter() {
         `↺ ${reallocate} units of ${skuId} reallocated from Order #${reallocateFrom} → Order #${orderId}; Order #${reallocateFrom} downgraded to Partial`,
         "text-warn",
       );
+      setPulsed([skuId]);
       log(`Bin A-02 stock updated · ${skuId} now marked Out of Stock`, "text-danger");
     } else {
       log(`✔ ${ex.id} approved · ${ex.recommendation}`, "text-ready");
