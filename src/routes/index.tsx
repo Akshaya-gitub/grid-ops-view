@@ -67,12 +67,15 @@ const ZONES: Array<"A" | "B" | "C"> = ["A", "B", "C"];
 
 function buildBins(): Bin[] {
   const seeds = [82, 64, 12, 0, 95, 47, 28, 71, 6, 88, 55, 33, 91, 18, 0, 60, 74, 41, 9, 86, 25, 68, 50, 97];
-  return seeds.map((level, i) => ({
-    id: `${ZONES[Math.floor(i / 8)]}-${String((i % 8) + 1).padStart(2, "0")}`,
-    zone: ZONES[Math.floor(i / 8)],
-    sku: `SKU-${4100 + i * 7}`,
-    level,
-  }));
+  return seeds.map((level, i) => {
+    const zone = ZONES[Math.floor(i / 8)] ?? "C";
+    return {
+      id: `${zone}-${String((i % 8) + 1).padStart(2, "0")}`,
+      zone,
+      sku: `SKU-${4100 + i * 7}`,
+      level,
+    };
+  });
 }
 
 type Alert = {
