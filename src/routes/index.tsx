@@ -465,7 +465,22 @@ function CommandCenter() {
         {/* RIGHT — exceptions + activity log */}
         <section className="flex flex-col gap-4">
           <div className="panel overflow-hidden">
-            <PanelHead icon={<Siren size={15} />} title="Exceptions" meta={`${exceptions.length} open`} />
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <h2 className="flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-widest text-muted-foreground">
+                <Siren size={15} /> Exceptions
+              </h2>
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
+                  <Pin size={10} /> {exceptions.length} pinned
+                </span>
+                <button
+                  onClick={resetAll}
+                  className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase text-muted-foreground transition-colors hover:bg-accent"
+                >
+                  <RotateCcw size={10} /> Reset
+                </button>
+              </div>
+            </div>
             <ul className="divide-y divide-border">
               {exceptions.map((ex) => {
                 const tone =
@@ -475,12 +490,21 @@ function CommandCenter() {
                       ? "border-warn/50 bg-warn/15 text-warn"
                       : "border-info/50 bg-info/15 text-info";
                 return (
-                  <li key={ex.id} className="p-4">
+                  <li key={ex.id} className="animate-fade-in p-4">
                     <div className="flex items-center justify-between gap-2">
                       <span className={`rounded border px-2 py-0.5 text-[11px] font-semibold uppercase ${tone}`}>
                         {ex.severity}
                       </span>
-                      <span className="font-mono text-[11px] text-muted-foreground">{ex.id}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[11px] text-muted-foreground">{ex.id}</span>
+                        <button
+                          onClick={() => dismiss(ex)}
+                          aria-label={`Dismiss ${ex.id}`}
+                          className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
                     </div>
                     <h3 className="mt-2 text-sm font-semibold">{ex.title}</h3>
                     <p className="text-xs text-muted-foreground">{ex.detail}</p>
@@ -516,16 +540,17 @@ function CommandCenter() {
           </div>
 
           <div className="panel flex-1 overflow-hidden">
-            <PanelHead icon={<ScrollText size={15} />} title="Activity Log" meta={`${activity.length} events`} />
+            <PanelHead icon={<ScrollText size={15} />} title="Activity Log" meta={`${activity.length} events · pinned`} />
             <ul className="max-h-[420px] space-y-2 overflow-y-auto p-4">
-              {activity.map((e, i) => (
-                <li key={i} className="font-mono text-[11px] leading-relaxed">
+              {activity.map((e) => (
+                <li key={e.id} className="animate-fade-in font-mono text-[11px] leading-relaxed">
                   <span className="text-primary">{e.t}</span> <span className={e.tone}>{e.msg}</span>
                 </li>
               ))}
             </ul>
           </div>
         </section>
+
       </main>
     </div>
   );
