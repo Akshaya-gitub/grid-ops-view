@@ -9,13 +9,17 @@ import {
   ClipboardList,
   Clock,
   PackageX,
+  Pin,
   PlayCircle,
+  RotateCcw,
   ScrollText,
   Settings2,
   Siren,
   Sparkles,
   Truck,
   Warehouse,
+  Wrench,
+  X,
   Zap,
 } from "lucide-react";
 import {
@@ -31,6 +35,7 @@ import {
   type Sku,
   type StockHealth,
 } from "@/lib/warehouse-data";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -99,17 +104,22 @@ const healthTone: Record<StockHealth, string> = {
 
 const STEPS = ["Inbound", "Putaway", "Pick", "Pack", "Stage", "Dispatch"] as const;
 
+type LogEntry = { id: number; t: string; msg: string; tone: string };
+
+let logSeq = 1;
+
 function CommandCenter() {
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
   const [inventory, setInventory] = useState<Sku[]>(INITIAL_INVENTORY);
   const [exceptions, setExceptions] = useState<Exception[]>(INITIAL_EXCEPTIONS);
-  const [activity, setActivity] = useState<Array<{ t: string; msg: string; tone: string }>>([
-    { t: "06:29:00", msg: "Shift started · 10 orders loaded, 15 SKUs synced", tone: "text-muted-foreground" },
+  const [activity, setActivity] = useState<LogEntry[]>([
+    { id: 0, t: "06:29:00", msg: "Shift started · 10 orders loaded, 15 SKUs synced", tone: "text-muted-foreground" },
   ]);
   const [activeStep, setActiveStep] = useState(2);
   const [selectedSku, setSelectedSku] = useState<string>("SKU-101");
   const [selectedOrder, setSelectedOrder] = useState<string>("88");
   const [dispatchRate, setDispatchRate] = useState(94);
+  const [pulsed, setPulsed] = useState<string[]>([]);
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -120,17 +130,57 @@ function CommandCenter() {
     return () => clearInterval(t);
   }, []);
 
+  useEffect(() => {
+    if (pulsed.length === 0) return;
+    const t = setTimeout(() => setPulsed([]), 6000);
+    return () => clearTimeout(t);
+  }, [pulsed]);
+
+  // Log entries are pinned: they accumulate and are only removed by an explicit reset.
   const log = (msg: string, tone = "text-muted-foreground") =>
-    setActivity((prev) =>
-      [
-        {
-          t: new Date().toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" }),
-          msg,
-          tone,
-        },
-        ...prev,
-      ].slice(0, 12),
+    setActivity((prev) => [
+      {
+        id: logSeq++,
+        t: new Date().toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" }),
+        msg,
+        tone,
+      },
+      ...prev,
+    ]);
+
+  function markDamaged(skuId: string) {
+    let label = "";
+    setInventory((prev) =>
+      prev.map((s) => {
+        if (s.sku !== skuId || s.qty === 0) return s;
+        const qty = s.qty - 1;
+        label = `${s.bin} · ${s.name}`;
+        return { ...s, qty, health: qty === 0 ? "Out of Stock" : "Damaged" };
+      }),
     );
+    setPulsed([skuId]);
+    log(`⚙ 1 unit of ${skuId} marked damaged · ${label} quarantined`, "text-info");
+  }
+
+  function dismiss(ex: Exception) {
+    setExceptions((prev) => prev.filter((e) => e.id !== ex.id));
+    log(`✕ ${ex.id} dismissed without action`, "text-muted-foreground");
+  }
+
+  function resetAll() {
+    setOrders(INITIAL_ORDERS);
+    setInventory(INITIAL_INVENTORY);
+    setExceptions(INITIAL_EXCEPTIONS);
+    setActiveStep(2);
+    setDispatchRate(94);
+    setPulsed([]);
+    setSelectedOrder("88");
+    setSelectedSku("SKU-101");
+    setActivity([
+      { id: logSeq++, t: new Date().toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" }), msg: "↺ Simulation state reset · baseline restored", tone: "text-primary" },
+    ]);
+  }
+
 
   const sorted = useMemo(() => [...orders].sort((a, b) => b.priority - a.priority), [orders]);
   const activeOrders = orders.filter((o) => o.status !== "Dispatched").length;
@@ -164,6 +214,7 @@ function CommandCenter() {
       },
       ...prev.filter((e) => e.id !== "EX-1101"),
     ]);
+    setPulsed(["SKU-101"]);
     log("⚡ High-priority Order #104 injected · 10 × SKU-101 requested", "text-danger");
     log("Exception EX-1101 raised · stock shortage on SKU-101", "text-danger");
   }
@@ -187,6 +238,7 @@ function CommandCenter() {
       },
       ...prev,
     ]);
+    setPulsed(["SKU-105", "SKU-203"]);
     log("Stockout cascade simulated · 2 bins at zero", "text-danger");
   }
 
@@ -204,6 +256,7 @@ function CommandCenter() {
       },
       ...prev,
     ]);
+    setPulsed(["SKU-204", "SKU-202"]);
     log("Dock delay simulated · dispatch rate degraded", "text-warn");
   }
 
@@ -244,6 +297,7 @@ function CommandCenter() {
         `↺ ${reallocate} units of ${skuId} reallocated from Order #${reallocateFrom} → Order #${orderId}; Order #${reallocateFrom} downgraded to Partial`,
         "text-warn",
       );
+      setPulsed([skuId]);
       log(`Bin A-02 stock updated · ${skuId} now marked Out of Stock`, "text-danger");
     } else {
       log(`✔ ${ex.id} approved · ${ex.recommendation}`, "text-ready");
@@ -406,27 +460,64 @@ function CommandCenter() {
                     {inventory
                       .filter((s) => s.zone === z.id)
                       .map((s) => (
-                        <button
-                          key={s.sku}
-                          onClick={() => setSelectedSku(s.sku)}
-                          className={`rounded border p-2 text-left transition-transform hover:scale-[1.03] ${healthTone[s.health]} ${
-                            selectedSku === s.sku ? "ring-2 ring-primary" : ""
-                          }`}
-                        >
-                          <span className="block font-mono text-[10px] opacity-80">
-                            {s.bin} · {s.sku}
-                          </span>
-                          <span className="block font-display text-lg font-bold leading-tight">{s.qty}</span>
-                          <span className="block truncate text-[10px] opacity-80">{s.health}</span>
-                          <span className="mt-1 block h-1 overflow-hidden rounded-full bg-background/40">
-                            <span
-                              className="block h-full rounded-full bg-current"
-                              style={{ width: `${Math.min(100, (s.qty / s.capacity) * 100)}%` }}
-                            />
-                          </span>
-                        </button>
+                        <Popover key={s.sku}>
+                          <PopoverTrigger asChild>
+                            <button
+                              onClick={() => setSelectedSku(s.sku)}
+                              className={`rounded border p-2 text-left transition-transform hover:scale-[1.03] ${healthTone[s.health]} ${
+                                selectedSku === s.sku ? "ring-2 ring-primary" : ""
+                              } ${pulsed.includes(s.sku) ? "animate-[pulse_1.4s_ease-in-out_infinite] ring-2 ring-current" : ""}`}
+                            >
+                              <span className="block font-mono text-[10px] opacity-80">
+                                {s.bin} · {s.sku}
+                              </span>
+                              <span className="block font-display text-lg font-bold leading-tight">{s.qty}</span>
+                              <span className="block truncate text-[10px] opacity-80">{s.health}</span>
+                              <span className="mt-1 block h-1 overflow-hidden rounded-full bg-background/40">
+                                <span
+                                  className="block h-full rounded-full bg-current"
+                                  style={{ width: `${Math.min(100, (s.qty / s.capacity) * 100)}%` }}
+                                />
+                              </span>
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent align="center" className="w-64 border-border bg-popover p-3">
+                            <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+                              Bin {s.bin} · {s.sku}
+                            </p>
+                            <p className="mt-1 font-display text-base font-semibold">{s.name}</p>
+                            <dl className="mt-2 space-y-1 text-xs">
+                              <div className="flex justify-between">
+                                <dt className="text-muted-foreground">Stock level</dt>
+                                <dd className="font-mono">
+                                  {s.qty} / {s.capacity} units
+                                </dd>
+                              </div>
+                              <div className="flex justify-between">
+                                <dt className="text-muted-foreground">Item status</dt>
+                                <dd>
+                                  <span className={`rounded border px-1.5 py-0.5 text-[11px] ${healthTone[s.health]}`}>
+                                    {s.health}
+                                  </span>
+                                </dd>
+                              </div>
+                              <div className="flex justify-between">
+                                <dt className="text-muted-foreground">Zone</dt>
+                                <dd className="font-mono">{z.label}</dd>
+                              </div>
+                            </dl>
+                            <button
+                              onClick={() => markDamaged(s.sku)}
+                              disabled={s.qty === 0}
+                              className="mt-3 flex w-full items-center justify-center gap-1.5 rounded border border-info/50 bg-info/15 px-2 py-1.5 text-xs font-semibold text-info transition-colors hover:bg-info/25 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <Wrench size={13} /> Mark 1 Item Damaged
+                            </button>
+                          </PopoverContent>
+                        </Popover>
                       ))}
                   </div>
+
                 </div>
               ))}
             </div>
@@ -465,7 +556,22 @@ function CommandCenter() {
         {/* RIGHT — exceptions + activity log */}
         <section className="flex flex-col gap-4">
           <div className="panel overflow-hidden">
-            <PanelHead icon={<Siren size={15} />} title="Exceptions" meta={`${exceptions.length} open`} />
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <h2 className="flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-widest text-muted-foreground">
+                <Siren size={15} /> Exceptions
+              </h2>
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
+                  <Pin size={10} /> {exceptions.length} pinned
+                </span>
+                <button
+                  onClick={resetAll}
+                  className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase text-muted-foreground transition-colors hover:bg-accent"
+                >
+                  <RotateCcw size={10} /> Reset
+                </button>
+              </div>
+            </div>
             <ul className="divide-y divide-border">
               {exceptions.map((ex) => {
                 const tone =
@@ -475,12 +581,21 @@ function CommandCenter() {
                       ? "border-warn/50 bg-warn/15 text-warn"
                       : "border-info/50 bg-info/15 text-info";
                 return (
-                  <li key={ex.id} className="p-4">
+                  <li key={ex.id} className="animate-fade-in p-4">
                     <div className="flex items-center justify-between gap-2">
                       <span className={`rounded border px-2 py-0.5 text-[11px] font-semibold uppercase ${tone}`}>
                         {ex.severity}
                       </span>
-                      <span className="font-mono text-[11px] text-muted-foreground">{ex.id}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[11px] text-muted-foreground">{ex.id}</span>
+                        <button
+                          onClick={() => dismiss(ex)}
+                          aria-label={`Dismiss ${ex.id}`}
+                          className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
                     </div>
                     <h3 className="mt-2 text-sm font-semibold">{ex.title}</h3>
                     <p className="text-xs text-muted-foreground">{ex.detail}</p>
@@ -516,16 +631,17 @@ function CommandCenter() {
           </div>
 
           <div className="panel flex-1 overflow-hidden">
-            <PanelHead icon={<ScrollText size={15} />} title="Activity Log" meta={`${activity.length} events`} />
+            <PanelHead icon={<ScrollText size={15} />} title="Activity Log" meta={`${activity.length} events · pinned`} />
             <ul className="max-h-[420px] space-y-2 overflow-y-auto p-4">
-              {activity.map((e, i) => (
-                <li key={i} className="font-mono text-[11px] leading-relaxed">
+              {activity.map((e) => (
+                <li key={e.id} className="animate-fade-in font-mono text-[11px] leading-relaxed">
                   <span className="text-primary">{e.t}</span> <span className={e.tone}>{e.msg}</span>
                 </li>
               ))}
             </ul>
           </div>
         </section>
+
       </main>
     </div>
   );
