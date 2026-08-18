@@ -10,13 +10,27 @@ import {
   Clock,
   PackageX,
   PlayCircle,
-  RefreshCw,
+  ScrollText,
+  Settings2,
   Siren,
   Sparkles,
   Truck,
   Warehouse,
   Zap,
 } from "lucide-react";
+import {
+  INITIAL_INVENTORY,
+  INITIAL_ORDERS,
+  URGENT_ORDER,
+  ZONES,
+  fmtClock,
+  healthFor,
+  statusFor,
+  type Order,
+  type OrderStatus,
+  type Sku,
+  type StockHealth,
+} from "@/lib/warehouse-data";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -40,164 +54,209 @@ export const Route = createFileRoute("/")({
   component: CommandCenter,
 });
 
-type Order = {
-  id: string;
-  customer: string;
-  items: number;
-  status: "Picking" | "Packing" | "Staged" | "Blocked" | "Ready";
-  priority: number;
-  sla: number; // seconds remaining
-  lane: string;
-};
-
-const BASE_ORDERS: Order[] = [
-  { id: "ORD-48211", customer: "Northwind Retail", items: 14, status: "Blocked", priority: 98, sla: 240, lane: "Zone A" },
-  { id: "ORD-48207", customer: "Kestrel Grocers", items: 6, status: "Picking", priority: 91, sla: 610, lane: "Zone B" },
-  { id: "ORD-48219", customer: "Halden Pharma", items: 3, status: "Packing", priority: 87, sla: 900, lane: "Zone C" },
-  { id: "ORD-48198", customer: "Volta Electronics", items: 22, status: "Staged", priority: 74, sla: 1500, lane: "Zone A" },
-  { id: "ORD-48224", customer: "Meridian Sports", items: 9, status: "Picking", priority: 66, sla: 2100, lane: "Zone B" },
-  { id: "ORD-48180", customer: "Ridgeline Cafe", items: 4, status: "Ready", priority: 52, sla: 3300, lane: "Zone C" },
-  { id: "ORD-48231", customer: "Aster Home", items: 11, status: "Picking", priority: 44, sla: 4200, lane: "Zone A" },
-  { id: "ORD-48233", customer: "Pinewood Supply", items: 7, status: "Staged", priority: 38, sla: 5400, lane: "Zone B" },
-];
-
-type Bin = { id: string; zone: "A" | "B" | "C"; sku: string; level: number };
-
-const ZONES: Array<"A" | "B" | "C"> = ["A", "B", "C"];
-
-function buildBins(): Bin[] {
-  const seeds = [82, 64, 12, 0, 95, 47, 28, 71, 6, 88, 55, 33, 91, 18, 0, 60, 74, 41, 9, 86, 25, 68, 50, 97];
-  return seeds.map((level, i) => {
-    const zone = ZONES[Math.floor(i / 8)] ?? "C";
-    return {
-      id: `${zone}-${String((i % 8) + 1).padStart(2, "0")}`,
-      zone,
-      sku: `SKU-${4100 + i * 7}`,
-      level,
-    };
-  });
-}
-
-type Alert = {
+type Exception = {
   id: string;
   severity: "critical" | "warning" | "info";
   title: string;
   detail: string;
   recommendation: string;
-  actions: [string, string];
+  kind: "shortage" | "sla" | "dock" | "count";
+  payload?: { orderId: string; sku: string; ship: number; reallocateFrom: string; reallocate: number };
 };
 
-const BASE_ALERTS: Alert[] = [
-  {
-    id: "EX-1042",
-    severity: "critical",
-    title: "Stockout on SKU-4128",
-    detail: "Bin A-04 empty · blocks ORD-48211 (14 items)",
-    recommendation: "Substitute from Zone C overflow (B-15 → A-04) and release the order.",
-    actions: ["Approve transfer", "Split order"],
-  },
+const INITIAL_EXCEPTIONS: Exception[] = [
   {
     id: "EX-1039",
     severity: "warning",
-    title: "SLA risk: 3 orders under 5 min",
+    kind: "sla",
+    title: "SLA risk: orders under 8 min",
     detail: "Pick path congestion at aisle A2",
     recommendation: "Reroute two pickers from Zone C to A2 for the next wave.",
-    actions: ["Reassign pickers", "Snooze 5m"],
-  },
-  {
-    id: "EX-1036",
-    severity: "warning",
-    title: "Dock 3 dispatch backlog",
-    detail: "7 staged pallets · carrier ETA slipped 22 min",
-    recommendation: "Shift 4 pallets to Dock 5 and re-scan manifests.",
-    actions: ["Move to Dock 5", "Notify carrier"],
   },
   {
     id: "EX-1030",
     severity: "info",
+    kind: "count",
     title: "Cycle count due in Zone B",
-    detail: "12 bins unverified for 48h",
+    detail: "5 bins unverified for 48h",
     recommendation: "Queue an off-peak count at 21:00 to protect pick accuracy.",
-    actions: ["Schedule count", "Dismiss"],
   },
 ];
 
-const STEPS = ["Inbound", "Putaway", "Pick", "Pack", "Stage", "Dispatch"] as const;
-
-function fmt(seconds: number) {
-  const s = Math.max(0, seconds);
-  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-}
-
-function levelTone(level: number) {
-  if (level === 0) return { cls: "bg-danger/25 border-danger text-danger", label: "Stockout" };
-  if (level < 30) return { cls: "bg-warn/20 border-warn text-warn", label: "Low" };
-  if (level < 70) return { cls: "bg-info/15 border-info/70 text-info", label: "Healthy" };
-  return { cls: "bg-ready/20 border-ready text-ready", label: "Full" };
-}
-
-const statusTone: Record<Order["status"], string> = {
-  Blocked: "bg-danger/20 text-danger border-danger/50",
-  Picking: "bg-info/15 text-info border-info/40",
-  Packing: "bg-warn/15 text-warn border-warn/40",
-  Staged: "bg-primary/15 text-primary border-primary/40",
-  Ready: "bg-ready/15 text-ready border-ready/40",
+const statusTone: Record<OrderStatus, string> = {
+  Pending: "bg-muted text-muted-foreground border-border",
+  Partial: "bg-warn/15 text-warn border-warn/40",
+  "Fully Allocated": "bg-ready/15 text-ready border-ready/40",
+  Dispatched: "bg-primary/15 text-primary border-primary/40",
 };
 
+const healthTone: Record<StockHealth, string> = {
+  Healthy: "bg-ready/20 border-ready text-ready",
+  "Low Stock": "bg-warn/20 border-warn text-warn",
+  Damaged: "bg-info/15 border-info/70 text-info",
+  "Out of Stock": "bg-danger/25 border-danger text-danger",
+};
+
+const STEPS = ["Inbound", "Putaway", "Pick", "Pack", "Stage", "Dispatch"] as const;
+
 function CommandCenter() {
-  const [orders, setOrders] = useState(BASE_ORDERS);
-  const [bins, setBins] = useState(buildBins);
-  const [alerts, setAlerts] = useState(BASE_ALERTS);
+  const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
+  const [inventory, setInventory] = useState<Sku[]>(INITIAL_INVENTORY);
+  const [exceptions, setExceptions] = useState<Exception[]>(INITIAL_EXCEPTIONS);
+  const [activity, setActivity] = useState<Array<{ t: string; msg: string; tone: string }>>([
+    { t: "06:29:00", msg: "Shift started · 10 orders loaded, 15 SKUs synced", tone: "text-muted-foreground" },
+  ]);
   const [activeStep, setActiveStep] = useState(2);
-  const [selectedBin, setSelectedBin] = useState<string | null>("A-04");
-  const [selectedOrder, setSelectedOrder] = useState<string>("ORD-48211");
+  const [selectedSku, setSelectedSku] = useState<string>("SKU-101");
+  const [selectedOrder, setSelectedOrder] = useState<string>("88");
   const [dispatchRate, setDispatchRate] = useState(94);
-  const [log, setLog] = useState<string[]>(["System armed · 06:29 UTC"]);
 
   useEffect(() => {
     const t = setInterval(() => {
-      setOrders((prev) => prev.map((o) => ({ ...o, sla: Math.max(0, o.sla - 1) })));
+      setOrders((prev) =>
+        prev.map((o) => (o.status === "Dispatched" ? o : { ...o, sla: Math.max(0, o.sla - 1) })),
+      );
     }, 1000);
     return () => clearInterval(t);
   }, []);
 
-  const sorted = useMemo(() => [...orders].sort((a, b) => b.priority - a.priority), [orders]);
-  const breaches = orders.filter((o) => o.sla < 300).length;
-  const lowStock = bins.filter((b) => b.level < 30).length;
-  const stockouts = bins.filter((b) => b.level === 0).length;
-  const bin = bins.find((b) => b.id === selectedBin);
-
-  const note = (m: string) => setLog((l) => [m, ...l].slice(0, 6));
-
-  const simulate = {
-    surge() {
-      setOrders((prev) =>
-        prev.map((o) => ({ ...o, priority: Math.min(99, o.priority + 4), sla: Math.max(30, o.sla - 180) })),
-      );
-      setDispatchRate((r) => Math.max(61, r - 9));
-      note("Order surge injected · +18% inbound volume");
-    },
-    stockout() {
-      setBins((prev) => prev.map((b, i) => (i % 7 === 3 ? { ...b, level: 0 } : b)));
-      setAlerts((prev) => [
+  const log = (msg: string, tone = "text-muted-foreground") =>
+    setActivity((prev) =>
+      [
         {
-          id: `EX-${1050 + prev.length}`,
-          severity: "critical",
-          title: "Multi-bin stockout cascade",
-          detail: "4 bins hit zero across Zone A and B",
-          recommendation: "Trigger emergency replenishment wave from inbound dock.",
-          actions: ["Run replen wave", "Hold affected orders"],
+          t: new Date().toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" }),
+          msg,
+          tone,
         },
         ...prev,
-      ]);
-      note("Stockout cascade simulated across 4 bins");
-    },
-    dockDelay() {
-      setActiveStep(4);
-      setDispatchRate((r) => Math.max(48, r - 14));
-      note("Dock delay simulated · dispatch rate degraded");
-    },
-  };
+      ].slice(0, 12),
+    );
+
+  const sorted = useMemo(() => [...orders].sort((a, b) => b.priority - a.priority), [orders]);
+  const activeOrders = orders.filter((o) => o.status !== "Dispatched").length;
+  const breaches = orders.filter((o) => o.status !== "Dispatched" && o.sla < 480).length;
+  const lowStock = inventory.filter((s) => s.health === "Low Stock" || s.health === "Out of Stock").length;
+  const outCount = inventory.filter((s) => s.health === "Out of Stock").length;
+  const sku = inventory.find((s) => s.sku === selectedSku);
+  const focusOrder = orders.find((o) => o.id === selectedOrder);
+
+  /* ---------------- simulations ---------------- */
+
+  function simulateHighPriorityOrder() {
+    if (orders.some((o) => o.id === URGENT_ORDER.id)) {
+      log("Urgent order #104 already in queue — ignored duplicate injection", "text-warn");
+      return;
+    }
+    const available = inventory.find((s) => s.sku === "SKU-101")?.qty ?? 0;
+    setOrders((prev) => [...prev, { ...URGENT_ORDER, lines: URGENT_ORDER.lines.map((l) => ({ ...l })) }]);
+    setSelectedOrder(URGENT_ORDER.id);
+    setSelectedSku("SKU-101");
+    setExceptions((prev) => [
+      {
+        id: "EX-1101",
+        severity: "critical",
+        kind: "shortage",
+        title: "Stock Shortage",
+        detail: `Urgent Order #104 requires 10 units of SKU-101 (${available} available in Bin A-02).`,
+        recommendation:
+          "Partial ship 7 units and reallocate 3 units from low-priority Order #88.",
+        payload: { orderId: "104", sku: "SKU-101", ship: 7, reallocateFrom: "88", reallocate: 3 },
+      },
+      ...prev.filter((e) => e.id !== "EX-1101"),
+    ]);
+    log("⚡ High-priority Order #104 injected · 10 × SKU-101 requested", "text-danger");
+    log("Exception EX-1101 raised · stock shortage on SKU-101", "text-danger");
+  }
+
+  function simulateStockout() {
+    setInventory((prev) =>
+      prev.map((s) =>
+        s.sku === "SKU-203" || s.sku === "SKU-105"
+          ? { ...s, qty: 0, health: healthFor(0, s.capacity, s.health === "Damaged" ? "Healthy" : s.health) }
+          : s,
+      ),
+    );
+    setExceptions((prev) => [
+      {
+        id: `EX-${1200 + prev.length}`,
+        severity: "critical",
+        kind: "shortage",
+        title: "Multi-bin stockout cascade",
+        detail: "SKU-105 (A-05) and SKU-203 (B-03) hit zero on hand.",
+        recommendation: "Trigger an emergency replenishment wave from the inbound dock.",
+      },
+      ...prev,
+    ]);
+    log("Stockout cascade simulated · 2 bins at zero", "text-danger");
+  }
+
+  function simulateDockDelay() {
+    setActiveStep(4);
+    setDispatchRate((r) => Math.max(48, r - 14));
+    setExceptions((prev) => [
+      {
+        id: `EX-${1300 + prev.length}`,
+        severity: "warning",
+        kind: "dock",
+        title: "Dock 3 dispatch backlog",
+        detail: "7 staged pallets · carrier ETA slipped 22 min",
+        recommendation: "Shift 4 pallets to Dock 5 and re-scan the manifests.",
+      },
+      ...prev,
+    ]);
+    log("Dock delay simulated · dispatch rate degraded", "text-warn");
+  }
+
+  /* ---------------- resolution ---------------- */
+
+  function approve(ex: Exception) {
+    if (ex.kind === "shortage" && ex.payload) {
+      const { orderId, sku: skuId, ship, reallocateFrom, reallocate } = ex.payload;
+      setInventory((prev) =>
+        prev.map((s) => {
+          if (s.sku !== skuId) return s;
+          const qty = Math.max(0, s.qty - ship);
+          return { ...s, qty, health: healthFor(qty, s.capacity, s.health) };
+        }),
+      );
+      setOrders((prev) =>
+        prev.map((o) => {
+          if (o.id === orderId) {
+            const lines = o.lines.map((l) =>
+              l.sku === skuId ? { ...l, allocated: Math.min(l.required, l.allocated + ship + reallocate) } : l,
+            );
+            return { ...o, lines, status: statusFor(lines, o.status) };
+          }
+          if (o.id === reallocateFrom) {
+            const lines = o.lines.map((l) =>
+              l.sku === skuId ? { ...l, allocated: Math.max(0, l.allocated - reallocate) } : l,
+            );
+            return { ...o, lines, status: statusFor(lines, o.status) };
+          }
+          return o;
+        }),
+      );
+      log(
+        `✔ EX-${ex.id.replace("EX-", "")} approved · ${ship} units of ${skuId} picked from Bin A-02 → Order #${orderId} (Partial ship)`,
+        "text-ready",
+      );
+      log(
+        `↺ ${reallocate} units of ${skuId} reallocated from Order #${reallocateFrom} → Order #${orderId}; Order #${reallocateFrom} downgraded to Partial`,
+        "text-warn",
+      );
+      log(`Bin A-02 stock updated · ${skuId} now marked Out of Stock`, "text-danger");
+    } else {
+      log(`✔ ${ex.id} approved · ${ex.recommendation}`, "text-ready");
+    }
+    setExceptions((prev) => prev.filter((e) => e.id !== ex.id));
+  }
+
+  function override(ex: Exception) {
+    log(`⚙ ${ex.id} manual override · routed to floor supervisor for review`, "text-warn");
+    setExceptions((prev) =>
+      prev.map((e) => (e.id === ex.id ? { ...e, severity: "info", detail: `${e.detail} · Manual override in progress` } : e)),
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -216,16 +275,16 @@ function CommandCenter() {
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <SimButton icon={<Zap size={15} />} onClick={simulate.surge} label="Simulate order surge" />
-              <SimButton icon={<PackageX size={15} />} onClick={simulate.stockout} label="Simulate stockout" tone="danger" />
-              <SimButton icon={<Truck size={15} />} onClick={simulate.dockDelay} label="Simulate dock delay" tone="warn" />
+              <SimButton icon={<Zap size={15} />} onClick={simulateHighPriorityOrder} label="Simulate High-Priority Order" tone="danger" />
+              <SimButton icon={<PackageX size={15} />} onClick={simulateStockout} label="Simulate Stockout" tone="warn" />
+              <SimButton icon={<Truck size={15} />} onClick={simulateDockDelay} label="Simulate Dock Delay" />
             </div>
           </div>
 
           <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <Kpi icon={<ClipboardList size={16} />} label="Active Orders" value={orders.length} sub="8 waves in flight" tone="primary" />
-            <Kpi icon={<Siren size={16} />} label="SLA Breaches" value={breaches} sub="under 5 min to due" tone="danger" />
-            <Kpi icon={<AlertTriangle size={16} />} label="Low Stock Alerts" value={lowStock} sub={`${stockouts} at zero`} tone="warn" />
+            <Kpi icon={<ClipboardList size={16} />} label="Active Orders" value={activeOrders} sub={`${orders.length} total in queue`} tone="primary" />
+            <Kpi icon={<Siren size={16} />} label="SLA Breaches" value={breaches} sub="under 8 min to due" tone="danger" />
+            <Kpi icon={<AlertTriangle size={16} />} label="Low Stock Alerts" value={lowStock} sub={`${outCount} out of stock`} tone="warn" />
             <Kpi icon={<Activity size={16} />} label="Dispatch Rate" value={`${dispatchRate}%`} sub="rolling 60 min" tone="ready" />
           </div>
         </div>
@@ -233,26 +292,50 @@ function CommandCenter() {
 
       <main className="mx-auto grid max-w-[1600px] gap-4 px-6 py-6 lg:grid-cols-[30fr_45fr_25fr]">
         {/* LEFT — order queue */}
-        <section className="panel flex flex-col overflow-hidden">
+        <section className="panel flex max-h-[calc(100vh-1rem)] flex-col overflow-hidden">
           <PanelHead icon={<ClipboardList size={15} />} title="Order Queue" meta="sorted by priority score" />
           <ul className="divide-y divide-border overflow-y-auto">
             {sorted.map((o) => {
-              const urgent = o.sla < 300;
-              const active = selectedOrder === o.id;
+              const req = o.lines.reduce((s, l) => s + l.required, 0);
+              const alloc = o.lines.reduce((s, l) => s + l.allocated, 0);
+              const urgent = o.status !== "Dispatched" && o.sla < 480;
               return (
                 <li key={o.id}>
                   <button
-                    onClick={() => setSelectedOrder(o.id)}
-                    className={`w-full px-4 py-3 text-left transition-colors hover:bg-accent/60 ${active ? "bg-accent/70" : ""}`}
+                    onClick={() => {
+                      setSelectedOrder(o.id);
+                      setSelectedSku(o.lines[0]?.sku ?? selectedSku);
+                    }}
+                    className={`w-full px-4 py-3 text-left transition-colors hover:bg-accent/60 ${
+                      selectedOrder === o.id ? "bg-accent/70" : ""
+                    } ${o.urgent ? "border-l-2 border-danger" : ""}`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-sm font-semibold">{o.id}</span>
-                      <span className={`flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px] ${urgent ? "border-danger/50 bg-danger/20 text-danger" : "border-border bg-muted text-muted-foreground"}`}>
-                        <Clock size={11} /> {fmt(o.sla)}
+                      <span className="flex items-center gap-2 font-mono text-sm font-semibold">
+                        ORD-{o.code}
+                        {o.urgent && (
+                          <span className="rounded bg-danger/20 px-1.5 text-[10px] font-bold uppercase text-danger">
+                            urgent
+                          </span>
+                        )}
+                      </span>
+                      <span
+                        className={`flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px] ${
+                          o.status === "Dispatched"
+                            ? "border-border bg-muted text-muted-foreground"
+                            : urgent
+                              ? "border-danger/50 bg-danger/20 text-danger"
+                              : "border-border bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        <Clock size={11} /> {o.status === "Dispatched" ? "done" : fmtClock(o.sla)}
                       </span>
                     </div>
                     <p className="mt-1 truncate text-sm text-muted-foreground">
-                      {o.customer} · {o.items} items · {o.lane}
+                      {o.customer} · {alloc}/{req} units allocated
+                    </p>
+                    <p className="mt-0.5 font-mono text-[11px] text-muted-foreground/80">
+                      {o.lines.map((l) => `${l.sku} ×${l.required}`).join(" · ")}
                     </p>
                     <div className="mt-2 flex items-center gap-2">
                       <span className={`rounded border px-2 py-0.5 text-[11px] font-medium ${statusTone[o.status]}`}>
@@ -282,11 +365,7 @@ function CommandCenter() {
             <div className="mt-4 flex items-center">
               {STEPS.map((s, i) => (
                 <div key={s} className="flex flex-1 items-center last:flex-none">
-                  <button
-                    onClick={() => setActiveStep(i)}
-                    className="flex flex-col items-center gap-1.5"
-                    aria-label={`Focus ${s} stage`}
-                  >
+                  <button onClick={() => setActiveStep(i)} className="flex flex-col items-center gap-1.5" aria-label={`Focus ${s} stage`}>
                     <span
                       className={`grid size-8 place-items-center rounded-full border text-xs font-semibold transition-colors ${
                         i < activeStep
@@ -298,13 +377,9 @@ function CommandCenter() {
                     >
                       {i < activeStep ? <Check size={14} /> : i + 1}
                     </span>
-                    <span className={`text-[11px] ${i === activeStep ? "text-foreground" : "text-muted-foreground"}`}>
-                      {s}
-                    </span>
+                    <span className={`text-[11px] ${i === activeStep ? "text-foreground" : "text-muted-foreground"}`}>{s}</span>
                   </button>
-                  {i < STEPS.length - 1 && (
-                    <span className={`mx-2 mb-5 h-0.5 flex-1 ${i < activeStep ? "bg-ready" : "bg-border"}`} />
-                  )}
+                  {i < STEPS.length - 1 && <span className={`mx-2 mb-5 h-0.5 flex-1 ${i < activeStep ? "bg-ready" : "bg-border"}`} />}
                 </div>
               ))}
             </div>
@@ -313,116 +388,126 @@ function CommandCenter() {
           <div className="panel flex-1 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-widest text-muted-foreground">
-                <Boxes size={15} /> Bin Map
+                <Boxes size={15} /> Bin Map · 15 SKUs
               </h2>
               <div className="flex items-center gap-3 font-mono text-[11px] text-muted-foreground">
-                <Legend cls="bg-ready" label="Full" />
-                <Legend cls="bg-info" label="Healthy" />
-                <Legend cls="bg-warn" label="Low" />
-                <Legend cls="bg-danger" label="Stockout" />
+                <Legend cls="bg-ready" label="Healthy" />
+                <Legend cls="bg-warn" label="Low Stock" />
+                <Legend cls="bg-info" label="Damaged" />
+                <Legend cls="bg-danger" label="Out of Stock" />
               </div>
             </div>
 
             <div className="mt-4 space-y-4">
               {ZONES.map((z) => (
-                <div key={z}>
-                  <p className="mb-2 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                    Zone {z}
-                  </p>
-                  <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
-                    {bins
-                      .filter((b) => b.zone === z)
-                      .map((b) => {
-                        const tone = levelTone(b.level);
-                        return (
-                          <button
-                            key={b.id}
-                            onClick={() => setSelectedBin(b.id)}
-                            className={`aspect-square rounded border p-1.5 text-left transition-transform hover:scale-[1.04] ${tone.cls} ${
-                              selectedBin === b.id ? "ring-2 ring-primary" : ""
-                            }`}
-                          >
-                            <span className="block font-mono text-[10px] opacity-80">{b.id}</span>
-                            <span className="block font-display text-base font-bold leading-tight">{b.level}%</span>
-                          </button>
-                        );
-                      })}
+                <div key={z.id}>
+                  <p className="mb-2 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">{z.label}</p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                    {inventory
+                      .filter((s) => s.zone === z.id)
+                      .map((s) => (
+                        <button
+                          key={s.sku}
+                          onClick={() => setSelectedSku(s.sku)}
+                          className={`rounded border p-2 text-left transition-transform hover:scale-[1.03] ${healthTone[s.health]} ${
+                            selectedSku === s.sku ? "ring-2 ring-primary" : ""
+                          }`}
+                        >
+                          <span className="block font-mono text-[10px] opacity-80">
+                            {s.bin} · {s.sku}
+                          </span>
+                          <span className="block font-display text-lg font-bold leading-tight">{s.qty}</span>
+                          <span className="block truncate text-[10px] opacity-80">{s.health}</span>
+                          <span className="mt-1 block h-1 overflow-hidden rounded-full bg-background/40">
+                            <span
+                              className="block h-full rounded-full bg-current"
+                              style={{ width: `${Math.min(100, (s.qty / s.capacity) * 100)}%` }}
+                            />
+                          </span>
+                        </button>
+                      ))}
                   </div>
                 </div>
               ))}
             </div>
 
-            {bin && (
-              <div className="mt-4 rounded border border-border bg-surface-2 p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {sku && (
+                <div className="rounded border border-border bg-surface-2 p-3">
                   <p className="font-mono text-sm">
-                    Bin <span className="font-semibold text-primary">{bin.id}</span> · {bin.sku}
+                    <span className="font-semibold text-primary">{sku.sku}</span> · {sku.bin}
                   </p>
-                  <span className={`rounded border px-2 py-0.5 text-[11px] ${levelTone(bin.level).cls}`}>
-                    {levelTone(bin.level).label} · {bin.level}%
-                  </span>
+                  <p className="text-sm text-foreground/90">{sku.name}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {sku.qty} / {sku.capacity} units on hand · {sku.health}
+                  </p>
                 </div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {bin.level === 0
-                    ? "Zero on hand. Replenishment required before the next pick wave."
-                    : bin.level < 30
-                      ? "Below reorder point. Replen task recommended this shift."
-                      : "Within target band. No action required."}
-                </p>
-              </div>
-            )}
+              )}
+              {focusOrder && (
+                <div className="rounded border border-border bg-surface-2 p-3">
+                  <p className="font-mono text-sm">
+                    Order <span className="font-semibold text-primary">ORD-{focusOrder.code}</span>
+                  </p>
+                  <p className="text-sm text-foreground/90">{focusOrder.customer}</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {focusOrder.lines.map((l) => (
+                      <li key={l.sku} className="font-mono text-[11px] text-muted-foreground">
+                        {l.sku}: {l.allocated}/{l.required} allocated
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           </div>
         </section>
 
-        {/* RIGHT — exceptions */}
+        {/* RIGHT — exceptions + activity log */}
         <section className="flex flex-col gap-4">
-          <div className="panel flex-1 overflow-hidden">
-            <PanelHead icon={<Siren size={15} />} title="Exceptions" meta={`${alerts.length} open`} />
-            <ul className="divide-y divide-border overflow-y-auto">
-              {alerts.map((a) => {
+          <div className="panel overflow-hidden">
+            <PanelHead icon={<Siren size={15} />} title="Exceptions" meta={`${exceptions.length} open`} />
+            <ul className="divide-y divide-border">
+              {exceptions.map((ex) => {
                 const tone =
-                  a.severity === "critical"
+                  ex.severity === "critical"
                     ? "border-danger/50 bg-danger/15 text-danger"
-                    : a.severity === "warning"
+                    : ex.severity === "warning"
                       ? "border-warn/50 bg-warn/15 text-warn"
                       : "border-info/50 bg-info/15 text-info";
                 return (
-                  <li key={a.id} className="p-4">
+                  <li key={ex.id} className="p-4">
                     <div className="flex items-center justify-between gap-2">
                       <span className={`rounded border px-2 py-0.5 text-[11px] font-semibold uppercase ${tone}`}>
-                        {a.severity}
+                        {ex.severity}
                       </span>
-                      <span className="font-mono text-[11px] text-muted-foreground">{a.id}</span>
+                      <span className="font-mono text-[11px] text-muted-foreground">{ex.id}</span>
                     </div>
-                    <h3 className="mt-2 text-sm font-semibold">{a.title}</h3>
-                    <p className="text-xs text-muted-foreground">{a.detail}</p>
+                    <h3 className="mt-2 text-sm font-semibold">{ex.title}</h3>
+                    <p className="text-xs text-muted-foreground">{ex.detail}</p>
                     <div className="mt-2 rounded border border-primary/30 bg-primary/10 p-2">
                       <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-primary">
                         <Sparkles size={11} /> Recommendation
                       </p>
-                      <p className="mt-1 text-xs text-foreground/90">{a.recommendation}</p>
+                      <p className="mt-1 text-xs text-foreground/90">{ex.recommendation}</p>
                     </div>
-                    <div className="mt-2 flex gap-2">
+                    <div className="mt-2 flex flex-col gap-2">
                       <button
-                        onClick={() => {
-                          setAlerts((prev) => prev.filter((x) => x.id !== a.id));
-                          note(`${a.id} resolved · ${a.actions[0]}`);
-                        }}
-                        className="flex flex-1 items-center justify-center gap-1 rounded border border-ready/50 bg-ready/15 px-2 py-1.5 text-xs font-medium text-ready transition-colors hover:bg-ready/25"
+                        onClick={() => approve(ex)}
+                        className="flex items-center justify-center gap-1.5 rounded border border-ready/50 bg-ready/15 px-2 py-1.5 text-xs font-semibold text-ready transition-colors hover:bg-ready/25"
                       >
-                        <Check size={13} /> {a.actions[0]}
+                        <Check size={13} /> Approve System Recommendation
                       </button>
                       <button
-                        onClick={() => note(`${a.id} deferred · ${a.actions[1]}`)}
-                        className="flex flex-1 items-center justify-center gap-1 rounded border border-border bg-muted px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent"
+                        onClick={() => override(ex)}
+                        className="flex items-center justify-center gap-1.5 rounded border border-border bg-muted px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent"
                       >
-                        {a.actions[1]} <ArrowRight size={13} />
+                        <Settings2 size={13} /> Manual Override <ArrowRight size={12} />
                       </button>
                     </div>
                   </li>
                 );
               })}
-              {alerts.length === 0 && (
+              {exceptions.length === 0 && (
                 <li className="p-6 text-center text-sm text-muted-foreground">
                   All exceptions cleared. Floor is running to plan.
                 </li>
@@ -430,14 +515,12 @@ function CommandCenter() {
             </ul>
           </div>
 
-          <div className="panel p-4">
-            <h2 className="flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-widest text-muted-foreground">
-              <RefreshCw size={14} /> Decision Log
-            </h2>
-            <ul className="mt-3 space-y-1.5">
-              {log.map((l, i) => (
-                <li key={i} className="font-mono text-[11px] text-muted-foreground">
-                  <span className="text-primary">›</span> {l}
+          <div className="panel flex-1 overflow-hidden">
+            <PanelHead icon={<ScrollText size={15} />} title="Activity Log" meta={`${activity.length} events`} />
+            <ul className="max-h-[420px] space-y-2 overflow-y-auto p-4">
+              {activity.map((e, i) => (
+                <li key={i} className="font-mono text-[11px] leading-relaxed">
+                  <span className="text-primary">{e.t}</span> <span className={e.tone}>{e.msg}</span>
                 </li>
               ))}
             </ul>
