@@ -9,13 +9,17 @@ import {
   ClipboardList,
   Clock,
   PackageX,
+  Pin,
   PlayCircle,
+  RotateCcw,
   ScrollText,
   Settings2,
   Siren,
   Sparkles,
   Truck,
   Warehouse,
+  Wrench,
+  X,
   Zap,
 } from "lucide-react";
 import {
@@ -31,6 +35,7 @@ import {
   type Sku,
   type StockHealth,
 } from "@/lib/warehouse-data";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 export const Route = createFileRoute("/")({
   head: () => ({
